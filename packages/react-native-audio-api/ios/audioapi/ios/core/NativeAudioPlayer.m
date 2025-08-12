@@ -40,7 +40,8 @@
   assert(audioEngine != nil);
   self.sourceNodeId = [audioEngine attachSourceNode:self.sourceNode format:self.format];
 
-  return [audioEngine startIfNecessary];
+  // if the engine is already running we need to restart it to make it use newly attached node
+  return [audioEngine restartAudioEngine];
 }
 
 - (void)stop
@@ -50,6 +51,7 @@
   AudioEngine *audioEngine = [AudioEngine sharedInstance];
   assert(audioEngine != nil);
   [audioEngine detachSourceNodeWithId:self.sourceNodeId];
+  [audioEngine restartAudioEngine];
   [audioEngine stopIfNecessary];
   self.sourceNodeId = nil;
 }

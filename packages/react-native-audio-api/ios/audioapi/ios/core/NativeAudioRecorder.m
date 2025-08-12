@@ -101,7 +101,9 @@
   AudioEngine *audioEngine = [AudioEngine sharedInstance];
   assert(audioEngine != nil);
   [audioEngine attachInputNode:self.sinkNode];
-  [audioEngine startIfNecessary];
+
+  // if the engine is running we need to restart it to make it use newly attached node
+  [audioEngine restartAudioEngine];
 }
 
 - (void)stop
@@ -109,6 +111,7 @@
   AudioEngine *audioEngine = [AudioEngine sharedInstance];
   assert(audioEngine != nil);
   [audioEngine detachInputNode];
+  [audioEngine restartAudioEngine];
   [audioEngine stopIfNecessary];
 }
 
