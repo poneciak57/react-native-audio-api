@@ -102,7 +102,13 @@
   assert(audioEngine != nil);
   [audioEngine attachInputNode:self.sinkNode];
 
-  // if the engine is running we need to restart it to make it use newly attached node
+  // AudioEngine allows us to attach and connect nodes at runtime but with few limitations
+  // in this case if it is the first recorder node and player started the engine we need to restart.
+  // It can be optimized by tracking if we haven't break rules of at runtime modifications from docs
+  // https://developer.apple.com/documentation/avfaudio/avaudioengine?language=objc
+  //
+  // Currently we are restarting because we do not see any significant performance issue and case when
+  // you will need to start and stop recorder very frequently
   [audioEngine restartAudioEngine];
 }
 
