@@ -113,12 +113,17 @@ void AudioNodeManager::handleDisconnectEvent(std::unique_ptr<Event> event) {
 
 void AudioNodeManager::handleDisconnectAllEvent(std::unique_ptr<Event> event) {
   assert(event->payloadType == EventPayloadType::NODES);
-  event->payload.nodes.from->disconnect();
+  for (auto it = event->payload.nodes.from->outputNodes_.begin();
+       it != event->payload.nodes.from->outputNodes_.end();) {
+    auto next = std::next(it);
+    event->payload.nodes.from->disconnectNode(*it);
+    it = next;
+  }
 }
 
 void AudioNodeManager::handleAddEvent(std::unique_ptr<Event> event) {
   switch (event->payloadType) {
-    case EventPayloadType::NODES:
+    case EventPayloadType::NODE:
       processingNodes_.insert(event->payload.node);
       break;
     case EventPayloadType::SOURCE_NODE:
