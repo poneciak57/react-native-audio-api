@@ -35,11 +35,10 @@
 - (bool)start
 {
   NSLog(@"[AudioPlayer] start");
-
+  
   AudioEngine *audioEngine = [AudioEngine sharedInstance];
   assert(audioEngine != nil);
-  self.sourceNodeId = [audioEngine attachSourceNode:self.sourceNode format:self.format];
-
+  
   // AudioEngine allows us to attach and connect nodes at runtime but with few limitations
   // in this case if it is the first player and recorder started the engine we need to restart.
   // It can be optimized by tracking if we haven't break rules of at runtime modifications from docs
@@ -47,7 +46,9 @@
   //
   // Currently we are restarting because we do not see any significant performance issue and case when
   // you will need to start and stop player very frequently
-  return [audioEngine restartAudioEngine];
+  [audioEngine stopEngine];
+  self.sourceNodeId = [audioEngine attachSourceNode:self.sourceNode format:self.format];
+  return [audioEngine startIfNecessary];
 }
 
 - (void)stop
@@ -57,7 +58,6 @@
   AudioEngine *audioEngine = [AudioEngine sharedInstance];
   assert(audioEngine != nil);
   [audioEngine detachSourceNodeWithId:self.sourceNodeId];
-  [audioEngine restartAudioEngine];
   [audioEngine stopIfNecessary];
   self.sourceNodeId = nil;
 }
@@ -67,9 +67,8 @@
   NSLog(@"[AudioPlayer] resume");
   AudioEngine *audioEngine = [AudioEngine sharedInstance];
   assert(audioEngine != nil);
-  [audioEngine startEngine];
 
-  return [audioEngine startEngine];
+  return [audioEngine startIfNecessary];
 }
 
 - (void)suspend
