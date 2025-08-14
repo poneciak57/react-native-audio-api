@@ -1,12 +1,10 @@
 #pragma once
 
-#include <condition_variable>
-#include <mutex>
 #include <thread>
 #include <atomic>
-#include <functional>
 #include <vector>
 #include <memory>
+#include <audioapi/utils/SpscChannel.hpp>
 
 namespace audioapi {
 
@@ -17,18 +15,26 @@ class AudioNodeDestructor {
   AudioNodeDestructor();
   ~AudioNodeDestructor();
 
-  void tryCallWithLock(const std::function<void()> &callback);
-  void addNodeForDeconstruction(const std::shared_ptr<AudioNode> &node);
-  void notify();
+  /// @brief Adds a node to the deconstruction queue.
+  /// @param node The audio node to be deconstructed.
+  /// @return True if the node was successfully added, false otherwise.
+  bool addNodeForDeconstruction(const std::shared_ptr<AudioNode> &node);
 
  private:
-  mutable std::mutex mutex_;
   std::thread thread_;
-  std::condition_variable cv_;
-  std::vector<std::shared_ptr<AudioNode>> nodesForDeconstruction_;
+  channels::spsc::Sender<
+    std::shared_ptr<AudioNode>,
+    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
+    channels::spsc::WaitStrategy::ATOMIC_WAIT> sender_;
 
   std::atomic<bool> isExiting_;
 
-  void process();
+  /// @brief Processes audio nodes for deconstruction.
+  /// @param receiver The receiver channel for incoming audio nodes.
+  void process(channels::spsc::Receiver<
+    std::shared_ptr<AudioNode>,
+    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
+    channels::spsc::WaitStrategy::ATOMIC_WAIT> &&receiver);
 };
+
 } // namespace audioapi

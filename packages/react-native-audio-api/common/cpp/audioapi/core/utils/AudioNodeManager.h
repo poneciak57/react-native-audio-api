@@ -8,6 +8,8 @@
 #include <vector>
 #include <unordered_set>
 
+#include <audioapi/utils/SpscChannel.hpp>
+
 namespace audioapi {
 
 class AudioNode;
@@ -16,30 +18,77 @@ class AudioParam;
 
 class AudioNodeManager {
  public:
-  enum class ConnectionType { CONNECT, DISCONNECT, DISCONNECT_ALL };
-  AudioNodeManager() = default;
+  enum class ConnectionType { CONNECT, DISCONNECT, DISCONNECT_ALL, ADD };
+  typedef ConnectionType EventType; // for backwards compatibility
+  enum class EventPayloadType { NODES, PARAMS, SOURCE_NODE, AUDIO_PARAM, NODE };
+  union EventPayload {
+    struct {
+      std::shared_ptr<AudioNode> from;
+      std::shared_ptr<AudioNode> to;
+    } nodes;
+    struct {
+      std::shared_ptr<AudioNode> from;
+      std::shared_ptr<AudioParam> to;
+    } params;
+    std::shared_ptr<AudioScheduledSourceNode> sourceNode;
+    std::shared_ptr<AudioParam> audioParam;
+    std::shared_ptr<AudioNode> node;
+
+    // Default constructor that initializes the first member
+    EventPayload() : nodes{} {}
+
+    // Destructor that does nothing (members will be handled explicitly)
+    ~EventPayload() {}
+  };
+  struct Event {
+    EventType type;
+    EventPayloadType payloadType;
+    EventPayload payload;
+  };
+
+  AudioNodeManager();
   ~AudioNodeManager();
 
   void preProcessGraph();
 
+  /// @brief Adds a pending connection between two audio nodes.
+  /// @param from The source audio node.
+  /// @param to The destination audio node.
+  /// @param type The type of connection (connect/disconnect).
+  /// @note Should be only used from JavaScript/HostObjects thread
   void addPendingNodeConnection(
       const std::shared_ptr<AudioNode> &from,
       const std::shared_ptr<AudioNode> &to,
       ConnectionType type);
 
+  /// @brief Adds a pending connection between an audio node and an audio parameter.
+  /// @param from The source audio node.
+  /// @param to The destination audio parameter.
+  /// @param type The type of connection (connect/disconnect).
+  /// @note Should be only used from JavaScript/HostObjects thread
   void addPendingParamConnection(
       const std::shared_ptr<AudioNode> &from,
       const std::shared_ptr<AudioParam> &to,
     ConnectionType type);
 
+  /// @brief Adds a processing node to the manager.
+  /// @param node The processing node to add.
+  /// @note Should be only used from JavaScript/HostObjects thread
   void addProcessingNode(const std::shared_ptr<AudioNode> &node);
+
+  /// @brief Adds a source node to the manager.
+  /// @param node The source node to add.
+  /// @note Should be only used from JavaScript/HostObjects thread
   void addSourceNode(const std::shared_ptr<AudioScheduledSourceNode> &node);
+
+  /// @brief Adds an audio parameter to the manager.
+  /// @param param The audio parameter to add.
+  /// @note Should be only used from JavaScript/HostObjects thread
   void addAudioParam(const std::shared_ptr<AudioParam> &param);
 
   void cleanup();
 
  private:
-  std::mutex graphLock_;
   AudioNodeDestructor nodeDeconstructor_;
 
   // all nodes created in the context
@@ -47,21 +96,22 @@ class AudioNodeManager {
   std::unordered_set<std::shared_ptr<AudioNode>> processingNodes_;
   std::unordered_set<std::shared_ptr<AudioParam>> audioParams_;
 
-  // connections to be settled
-  std::vector<std::tuple<
-      std::shared_ptr<AudioNode>,
-      std::shared_ptr<AudioNode>,
-      ConnectionType>>
-      audioNodesToConnect_;
+  channels::spsc::Receiver<
+    std::unique_ptr<Event>,
+    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
+    channels::spsc::WaitStrategy::BUSY_LOOP> receiver_;
 
-  std::vector<std::tuple<
-      std::shared_ptr<AudioNode>,
-      std::shared_ptr<AudioParam>,
-      ConnectionType>>
-      audioParamToConnect_;
+  channels::spsc::Sender<
+    std::unique_ptr<Event>,
+    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
+    channels::spsc::WaitStrategy::BUSY_LOOP> sender_;
 
-  std::mutex &getGraphLock();
   void settlePendingConnections();
+  void handleConnectEvent(std::unique_ptr<Event> event);
+  void handleDisconnectEvent(std::unique_ptr<Event> event);
+  void handleDisconnectAllEvent(std::unique_ptr<Event> event);
+  void handleAddEvent(std::unique_ptr<Event> event);
+
   void cleanupNode(const std::shared_ptr<AudioNode> &node);
   void prepareNodesForDestruction();
 };
