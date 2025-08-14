@@ -1,9 +1,12 @@
+#pragma once
+
 #include <atomic>
 #include <memory>
 #include <algorithm>
 #include <thread>
 
 namespace audioapi::channels::spsc {
+
 
 /// @brief Overflow strategy for sender when the channel is full
 enum class OverflowStrategy {
@@ -19,11 +22,18 @@ enum class WaitStrategy {
     /// @brief Busy loop waiting strategy
     /// @note should be used when low latency is required and channel is not expected to wait
     /// @note should be definitly used with OverflowStrategy::OVERWRITE_ON_FULL
+    /// @note it uses `asm volatile ("" ::: "memory")` to prevent harmful compiler optimizations
     BUSY_LOOP,
 
     /// @brief Yielding waiting strategy
     /// @note should be used when low latency is not critical and channel is expected to wait
-    YIELD
+    /// @note it uses std::this_thread::yield under the hood
+    YIELD,
+
+    /// @brief Atomic waiting strategy
+    /// @note should be used when low latency is required and channel is expected to wait for longer
+    /// @note it uses std::atomic_wait under the hood
+    ATOMIC_WAIT,
 };
 
 /// @brief Response status for channel operations
@@ -41,7 +51,7 @@ template<typename T, OverflowStrategy Strategy, WaitStrategy Wait>
 class Sender;
 template<typename T, OverflowStrategy Strategy, WaitStrategy Wait>
 class Receiver;
-template<typename T, OverflowStrategy Strategy>
+template<typename T, OverflowStrategy Strategy, WaitStrategy Wait>
 class InnerChannel;
 
 /// @brief Create a bounded single-producer, single-consumer channel
@@ -52,7 +62,7 @@ class InnerChannel;
 /// @return A pair of sender and receiver for the channel
 template <typename T, OverflowStrategy Strategy = OverflowStrategy::WAIT_ON_FULL, WaitStrategy Wait = WaitStrategy::BUSY_LOOP>
 std::pair<Sender<T, Strategy, Wait>, Receiver<T, Strategy, Wait>> channel(size_t capacity) {
-    auto channel = std::make_shared<InnerChannel<T, Strategy>>(capacity);
+    auto channel = std::make_shared<InnerChannel<T, Strategy, Wait>>(capacity);
     return { Sender<T, Strategy, Wait>(channel), Receiver<T, Strategy, Wait>(channel) };
 }
 
@@ -63,9 +73,9 @@ std::pair<Sender<T, Strategy, Wait>, Receiver<T, Strategy, Wait>> channel(size_t
 template <typename T, OverflowStrategy Strategy = OverflowStrategy::WAIT_ON_FULL, WaitStrategy Wait = WaitStrategy::BUSY_LOOP>
 class Sender {
     /// Disallows sender creation outside of channel function
-    explicit Sender(std::shared_ptr<InnerChannel<T, Strategy>> chan) : channel_(chan) {}
+    explicit Sender(std::shared_ptr<InnerChannel<T, Strategy, Wait>> chan) : channel_(chan) {}
 public:
-    Sender() = delete;
+    Sender() : channel_(nullptr) {}
     Sender(const Sender&) = delete;
     Sender& operator=(const Sender&) = delete;
     
@@ -87,11 +97,17 @@ public:
     /// @param value The value to send
     /// @note This function is blocking and will wait until the value is sent.
     void send(const T& value) {
+        size_t rcvCursor;
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            rcvCursor = channel_->rcvCursor_.load(std::memory_order_acquire);
+        }
         while (channel_->try_send(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
             } else if constexpr (Wait == WaitStrategy::BUSY_LOOP) {
                 asm volatile ("" ::: "memory"); // Busy loop, just spin with compiler barrier
+            } else if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+                channel_->rcvCursor_.wait(rcvCursor, std::memory_order_acquire);
             }
         }
     }
@@ -100,17 +116,23 @@ public:
     /// @param value The value to send
     /// @note This function is blocking and will wait until the value is sent.
     void send(T&& value) {
+        size_t rcvCursor;
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            rcvCursor = channel_->rcvCursor_.load(std::memory_order_acquire);
+        }
         while (channel_->try_send(std::move(value)) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
             } else if constexpr (Wait == WaitStrategy::BUSY_LOOP) {
                 asm volatile ("" ::: "memory"); // Busy loop, just spin with compiler barrier
+            } else if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+                channel_->rcvCursor_.wait(rcvCursor, std::memory_order_acquire);
             }
         }
     }
 
 private:
-    std::shared_ptr<InnerChannel<T, Strategy>> channel_;
+    std::shared_ptr<InnerChannel<T, Strategy, Wait>> channel_;
 
     friend std::pair<Sender<T, Strategy, Wait>, Receiver<T, Strategy, Wait>> channel<T, Strategy, Wait>(size_t capacity);
 };
@@ -122,9 +144,9 @@ private:
 template <typename T, OverflowStrategy Strategy = OverflowStrategy::WAIT_ON_FULL, WaitStrategy Wait = WaitStrategy::BUSY_LOOP>
 class Receiver {
     /// Disallows receiver creation outside of channel function
-    explicit Receiver(std::shared_ptr<InnerChannel<T, Strategy>> chan) : channel_(chan) {}
+    explicit Receiver(std::shared_ptr<InnerChannel<T, Strategy, Wait>> chan) : channel_(chan) {}
 public:
-    Receiver() = delete;
+    Receiver() : channel_(nullptr) {}
     Receiver(const Receiver&) = delete;
     Receiver& operator=(const Receiver&) = delete;
 
@@ -146,18 +168,24 @@ public:
     /// @note This function is blocking and will wait until a value is available.
     T receive() {
         T value;
+        size_t senderCursor;
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            senderCursor = channel_->sendCursor_.load(std::memory_order_acquire);
+        }
         while (channel_->try_receive(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
             } else if constexpr (Wait == WaitStrategy::BUSY_LOOP) {
                 asm volatile ("" ::: "memory"); // Busy loop, just spin with compiler barrier
+            } else if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+                channel_->sendCursor_.wait(senderCursor, std::memory_order_acquire);
             }
         }
         return value;
     }
 
 private:
-    std::shared_ptr<InnerChannel<T, Strategy>> channel_;
+    std::shared_ptr<InnerChannel<T, Strategy, Wait>> channel_;
 
     friend std::pair<Sender<T, Strategy, Wait>, Receiver<T, Strategy, Wait>> channel<T, Strategy, Wait>(size_t capacity);
 };
@@ -165,9 +193,10 @@ private:
 /// @brief Inner channel implementation for the SPSC queue
 /// @tparam T The type of values sent through the channel
 /// @tparam Strategy The overflow strategy to use when the channel is full
+/// @tparam Wait The wait strategy used for internal operations
 /// This class is not intended to be used directly by users.
 /// @note this class is not thread safe and should be wrapped in std::shared_ptr
-template <typename T, OverflowStrategy Strategy = OverflowStrategy::WAIT_ON_FULL>
+template <typename T, OverflowStrategy Strategy = OverflowStrategy::WAIT_ON_FULL, WaitStrategy Wait = WaitStrategy::BUSY_LOOP>
 class InnerChannel {
 public:
     /// @brief Construct a channel with a given capacity
@@ -251,6 +280,10 @@ public:
 
         rcvCursor_.store(next_index(rcvCursor), std::memory_order_release);
         
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            rcvCursor_.notify_one(); // Notify sender that a value has been received
+        }
+        
         if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
             oldestOccupied_.store(false, std::memory_order_release);
         }
@@ -275,6 +308,11 @@ private:
         new (&buffer_[sendCursor]) T(std::forward<U>(value));
         
         sendCursor_.store(next_sendCursor, std::memory_order_release);
+
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            sendCursor_.notify_one(); // Notify receiver that a value has been sent
+        }
+
         return ResponseStatus::SUCCESS;
     }
     
@@ -311,7 +349,11 @@ private:
         // Normal case: buffer not full
         new (&buffer_[sendCursor]) T(std::forward<U>(value));
         sendCursor_.store(next_sendCursor, std::memory_order_release);
-
+        
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            sendCursor_.notify_one(); // Notify receiver that a value has been sent
+        }
+        
         return ResponseStatus::SUCCESS;
     }
 
@@ -351,6 +393,9 @@ private:
 
     /// Flag indicating if the oldest element is occupied
     alignas(64) std::atomic<bool> oldestOccupied_{false};
+
+    friend class Sender<T, Strategy, Wait>;
+    friend class Receiver<T, Strategy, Wait>;
 };
 
 
