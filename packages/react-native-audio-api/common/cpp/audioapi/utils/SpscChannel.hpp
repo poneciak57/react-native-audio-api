@@ -97,17 +97,13 @@ public:
     /// @param value The value to send
     /// @note This function is blocking and will wait until the value is sent.
     void send(const T& value) {
-        size_t rcvCursor;
-        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-            rcvCursor = channel_->rcvCursor_.load(std::memory_order_acquire);
-        }
         while (channel_->try_send(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
             } else if constexpr (Wait == WaitStrategy::BUSY_LOOP) {
                 asm volatile ("" ::: "memory"); // Busy loop, just spin with compiler barrier
             } else if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-                channel_->rcvCursor_.wait(rcvCursor, std::memory_order_acquire);
+                channel_->rcvCursor_.wait(channel_->rcvCursorCache_, std::memory_order_acquire);
             }
         }
     }
@@ -116,17 +112,13 @@ public:
     /// @param value The value to send
     /// @note This function is blocking and will wait until the value is sent.
     void send(T&& value) {
-        size_t rcvCursor;
-        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-            rcvCursor = channel_->rcvCursor_.load(std::memory_order_acquire);
-        }
         while (channel_->try_send(std::move(value)) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
             } else if constexpr (Wait == WaitStrategy::BUSY_LOOP) {
                 asm volatile ("" ::: "memory"); // Busy loop, just spin with compiler barrier
             } else if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-                channel_->rcvCursor_.wait(rcvCursor, std::memory_order_acquire);
+                channel_->rcvCursor_.wait(channel_->rcvCursorCache_, std::memory_order_acquire);
             }
         }
     }
@@ -172,17 +164,13 @@ public:
     /// @note This function is blocking and will wait until a value is available.
     T receive() {
         T value;
-        size_t senderCursor;
-        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-            senderCursor = channel_->sendCursor_.load(std::memory_order_acquire);
-        }
         while (channel_->try_receive(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
             } else if constexpr (Wait == WaitStrategy::BUSY_LOOP) {
                 asm volatile ("" ::: "memory"); // Busy loop, just spin with compiler barrier
             } else if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-                channel_->sendCursor_.wait(senderCursor, std::memory_order_acquire);
+                channel_->sendCursor_.wait(channel_->sendCursorCache_, std::memory_order_acquire);
             }
         }
         return value;
@@ -288,12 +276,12 @@ public:
 
         rcvCursor_.store(next_index(rcvCursor), std::memory_order_release);
         
-        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
-            rcvCursor_.notify_one(); // Notify sender that a value has been received
-        }
-        
         if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
             oldestOccupied_.store(false, std::memory_order_release);
+        }
+        
+        if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
+            rcvCursor_.notify_one(); // Notify sender that a value has been received
         }
 
         return ResponseStatus::SUCCESS;
