@@ -131,6 +131,10 @@ public:
         }
     }
 
+    bool is_lock_free() const {
+        return channel_->is_lock_free();
+    }
+
 private:
     std::shared_ptr<InnerChannel<T, Strategy, Wait>> channel_;
 
@@ -182,6 +186,10 @@ public:
             }
         }
         return value;
+    }
+
+    bool is_lock_free() const {
+        return channel_->is_lock_free();
     }
 
 private:
@@ -289,6 +297,14 @@ public:
         }
 
         return ResponseStatus::SUCCESS;
+    }
+
+    bool is_lock_free() const {
+        if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
+            return sendCursor_.is_lock_free() && rcvCursor_.is_lock_free() && oldestOccupied_.is_lock_free();
+        } else {
+            return sendCursor_.is_lock_free() && rcvCursor_.is_lock_free();
+        }
     }
 
 private:

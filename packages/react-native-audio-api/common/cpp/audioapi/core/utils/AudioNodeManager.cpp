@@ -6,14 +6,74 @@
 
 namespace audioapi {
 
+AudioNodeManager::Event::Event(Event &&other) {
+  *this = std::move(other);
+}
+
+AudioNodeManager::Event &AudioNodeManager::Event::operator=(Event &&other) {
+  if (this != &other) {
+    // Clean up current resources
+    this->~Event();
+
+    // Move resources from the other event
+    type = other.type;
+    payloadType = other.payloadType;
+    switch (payloadType) {
+      case EventPayloadType::NODES:
+        payload.nodes.from = std::move(other.payload.nodes.from);
+        payload.nodes.to = std::move(other.payload.nodes.to);
+        break;
+      case EventPayloadType::PARAMS:
+        payload.params.from = std::move(other.payload.params.from);
+        payload.params.to = std::move(other.payload.params.to);
+        break;
+      case EventPayloadType::SOURCE_NODE:
+        payload.sourceNode = std::move(other.payload.sourceNode);
+        break;
+      case EventPayloadType::AUDIO_PARAM:
+        payload.audioParam = std::move(other.payload.audioParam);
+        break;
+      case EventPayloadType::NODE:
+        payload.node = std::move(other.payload.node);
+        break;
+
+      default:
+        break;
+    }
+  }
+  return *this;
+}
+
+AudioNodeManager::Event::~Event() {
+  switch (payloadType) {
+    case EventPayloadType::NODES:
+      payload.nodes.from.~shared_ptr();
+      payload.nodes.to.~shared_ptr();
+      break;
+    case EventPayloadType::PARAMS:
+      payload.params.from.~shared_ptr();
+      payload.params.to.~shared_ptr();
+      break;
+    case EventPayloadType::SOURCE_NODE:
+      payload.sourceNode.~shared_ptr();
+      break;
+    case EventPayloadType::AUDIO_PARAM:
+      payload.audioParam.~shared_ptr();
+      break;
+    case EventPayloadType::NODE:
+      payload.node.~shared_ptr();
+      break;
+  }
+}
+
 AudioNodeManager::AudioNodeManager() {
-  constexpr size_t CHANNEL_CAPACITY = 1024;
-  auto [sender, receiver] = channels::spsc::channel<
+  auto channel_pair = channels::spsc::channel<
       std::unique_ptr<Event>,
       channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-      channels::spsc::WaitStrategy::BUSY_LOOP>(CHANNEL_CAPACITY);
-  sender_ = std::move(sender);
-  receiver_ = std::move(receiver);
+      channels::spsc::WaitStrategy::BUSY_LOOP>(1024);
+
+  sender_ = std::move(channel_pair.first);
+  receiver_ = std::move(channel_pair.second);
 }
 
 AudioNodeManager::~AudioNodeManager() {
@@ -137,11 +197,6 @@ void AudioNodeManager::handleAddEvent(std::unique_ptr<Event> event) {
   }
 }
 
-void AudioNodeManager::cleanupNode(const std::shared_ptr<AudioNode> &node) {
-  node->cleanup();
-  nodeDeconstructor_.addNodeForDeconstruction(node);
-}
-
 void AudioNodeManager::prepareNodesForDestruction() {
   auto sNodesIt = sourceNodes_.begin();
 
@@ -150,8 +205,12 @@ void AudioNodeManager::prepareNodesForDestruction() {
     // playing
     if (sNodesIt->use_count() == 1 &&
         (sNodesIt->get()->isUnscheduled() || sNodesIt->get()->isFinished())) {
-      cleanupNode(*sNodesIt);
-      sNodesIt = sourceNodes_.erase(sNodesIt);
+      (*sNodesIt)->cleanup();
+      if (nodeDeconstructor_.tryAddNodeForDeconstruction(*sNodesIt)) {
+        sNodesIt = sourceNodes_.erase(sNodesIt);
+      } else {
+        ++sNodesIt;
+      }
     } else {
       ++sNodesIt;
     }
@@ -161,8 +220,12 @@ void AudioNodeManager::prepareNodesForDestruction() {
 
   while (pNodesIt != processingNodes_.end()) {
     if (pNodesIt->use_count() == 1) {
-      cleanupNode(*pNodesIt);
-      pNodesIt = processingNodes_.erase(pNodesIt);
+      (*pNodesIt)->cleanup();
+      if (nodeDeconstructor_.tryAddNodeForDeconstruction(*pNodesIt)) {
+        pNodesIt = processingNodes_.erase(pNodesIt);
+      } else {
+        ++pNodesIt;
+      }
     } else {
       ++pNodesIt;
     }

@@ -9,7 +9,7 @@ AudioNodeDestructor::AudioNodeDestructor() {
   auto [sender, receiver] = channels::spsc::channel<
       std::shared_ptr<AudioNode>,
       channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-      channels::spsc::WaitStrategy::ATOMIC_WAIT>(32);
+      channels::spsc::WaitStrategy::ATOMIC_WAIT>(1024);
   sender_ = std::move(sender);
   thread_ =
       std::thread(&AudioNodeDestructor::process, this, std::move(receiver));
@@ -25,7 +25,7 @@ AudioNodeDestructor::~AudioNodeDestructor() {
   }
 }
 
-bool AudioNodeDestructor::addNodeForDeconstruction(
+bool AudioNodeDestructor::tryAddNodeForDeconstruction(
     const std::shared_ptr<AudioNode> &node) {
   return sender_.try_send(node) == channels::spsc::ResponseStatus::SUCCESS;
 }

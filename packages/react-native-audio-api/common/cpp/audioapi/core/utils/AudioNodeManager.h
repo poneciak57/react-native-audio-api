@@ -37,13 +37,18 @@ class AudioNodeManager {
     // Default constructor that initializes the first member
     EventPayload() : nodes{} {}
 
-    // Destructor that does nothing (members will be handled explicitly)
+    // Destructor - we'll handle cleanup explicitly in Event destructor
     ~EventPayload() {}
   };
   struct Event {
     EventType type;
     EventPayloadType payloadType;
     EventPayload payload;
+
+    Event(Event&& other);
+    Event& operator=(Event&& other);
+    Event() : type(ConnectionType::CONNECT), payloadType(EventPayloadType::NODES), payload() {}
+    ~Event();
   };
 
   AudioNodeManager();
@@ -112,7 +117,6 @@ class AudioNodeManager {
   void handleDisconnectAllEvent(std::unique_ptr<Event> event);
   void handleAddEvent(std::unique_ptr<Event> event);
 
-  void cleanupNode(const std::shared_ptr<AudioNode> &node);
   void prepareNodesForDestruction();
 };
 
