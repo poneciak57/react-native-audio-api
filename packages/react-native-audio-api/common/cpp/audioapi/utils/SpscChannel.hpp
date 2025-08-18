@@ -1,12 +1,38 @@
+/*
+ * Channels-CPP - A high-performance lock-free channel library for C++
+ * Single Producer Single Consumer (SPSC) Channel Implementation
+ * 
+ * Copyright (c) 2025 poneciak57
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 #pragma once
 
 #include <atomic>
 #include <memory>
 #include <algorithm>
 #include <thread>
+#include <type_traits>
 
-namespace audioapi::channels::spsc {
 
+namespace channels::spsc {
 
 /// @brief Overflow strategy for sender when the channel is full
 enum class OverflowStrategy {
@@ -42,8 +68,8 @@ enum class ResponseStatus {
     CHANNEL_FULL,
     CHANNEL_EMPTY,
 
-    // Only for OVERWRITE_ON_FULL strategy
-    // Indicates that the last value is being overwritten or read so try fails
+    /// @brief Indicates that the last value is being overwritten or read so try fails
+    /// @note This status is only returned if given channel supports OVERWRITE_ON_FULL strategy
     SKIP_DUE_TO_OVERWRITE
 };
 
@@ -75,28 +101,30 @@ class Sender {
     /// Disallows sender creation outside of channel function
     explicit Sender(std::shared_ptr<InnerChannel<T, Strategy, Wait>> chan) : channel_(chan) {}
 public:
-    Sender() : channel_(nullptr) {}
+    /// @brief Default constructor
+    /// @note required to have sender as class member
+    Sender() = default;
     Sender(const Sender&) = delete;
     Sender& operator=(const Sender&) = delete;
-    
-    Sender& operator=(Sender&& other) {
+
+    Sender& operator=(Sender&& other) noexcept {
         channel_ = std::move(other.channel_);
         return *this;
     } 
-    Sender(Sender&& other) : channel_(std::move(other.channel_)) {}
+    Sender(Sender&& other) noexcept : channel_(std::move(other.channel_)) {}
 
     /// @brief Try to send a value to the channel
     /// @param value The value to send
     /// @return ResponseStatus indicating the result of the operation
     template<typename U>
-    ResponseStatus try_send(U&& value) {
+    ResponseStatus try_send(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
         return channel_->try_send(std::forward<U>(value));
     }
 
     /// @brief Send a value to the channel (copy version)
     /// @param value The value to send
     /// @note This function is blocking and will wait until the value is sent.
-    void send(const T& value) {
+    void send(const T& value) noexcept(std::is_nothrow_constructible_v<T, const T&>) {
         while (channel_->try_send(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
@@ -110,8 +138,8 @@ public:
 
     /// @brief Send a value to the channel (move version)
     /// @param value The value to send
-    /// @note This function is blocking and will wait until the value is sent.
-    void send(T&& value) {
+    /// @note This function is lock-free but may block if the channel is full.
+    void send(T&& value) noexcept(std::is_nothrow_constructible_v<T, T&&>) {
         while (channel_->try_send(std::move(value)) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
                 std::this_thread::yield(); // Yield to allow other threads to run
@@ -121,10 +149,6 @@ public:
                 channel_->rcvCursor_.wait(channel_->rcvCursorCache_, std::memory_order_acquire);
             }
         }
-    }
-
-    bool is_lock_free() const {
-        return channel_->is_lock_free();
     }
 
 private:
@@ -142,27 +166,30 @@ class Receiver {
     /// Disallows receiver creation outside of channel function
     explicit Receiver(std::shared_ptr<InnerChannel<T, Strategy, Wait>> chan) : channel_(chan) {}
 public:
-    Receiver() : channel_(nullptr) {}
+    /// @brief Default constructor
+    /// @note required to have receiver as class member
+    Receiver() = default;
     Receiver(const Receiver&) = delete;
     Receiver& operator=(const Receiver&) = delete;
 
-    Receiver& operator=(Receiver&& other) {
+    Receiver& operator=(Receiver&& other) noexcept {
         channel_ = std::move(other.channel_);
         return *this;
     }
-    Receiver(Receiver&& other) : channel_(std::move(other.channel_)) {}
+    Receiver(Receiver&& other) noexcept : channel_(std::move(other.channel_)) {}
 
     /// @brief Try to receive a value from the channel
     /// @param value The received value
-    /// @return True if a value was received, false if the channel is empty or the last value was overwritten (OVERWRITE_ON_FULL only)
-    ResponseStatus try_receive(T& value) {
+    /// @return ResponseStatus indicating the result of the operation
+    /// @note This function is lock-free and wait-free.
+    ResponseStatus try_receive(T& value) noexcept(std::is_nothrow_move_assignable_v<T> && std::is_nothrow_destructible_v<T>) {
         return channel_->try_receive(value);
     }
 
     /// @brief Receive a value from the channel
     /// @return The received value
-    /// @note This function is blocking and will wait until a value is available.
-    T receive() {
+    /// @note This function is lock-free but may block if the channel is empty.
+    T receive() noexcept(std::is_nothrow_default_constructible_v<T> && std::is_nothrow_move_assignable_v<T> && std::is_nothrow_destructible_v<T>) {
         T value;
         while (channel_->try_receive(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
@@ -174,10 +201,6 @@ public:
             }
         }
         return value;
-    }
-
-    bool is_lock_free() const {
-        return channel_->is_lock_free();
     }
 
 private:
@@ -235,7 +258,7 @@ public:
     /// @return ResponseStatus indicating the result of the operation
     /// @note This function is lock-free and wait-free
     template<typename U>
-    ResponseStatus try_send(U&& value) {
+    ResponseStatus try_send(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
         if constexpr (Strategy == OverflowStrategy::WAIT_ON_FULL) {
             return try_send_wait_on_full(std::forward<U>(value));
         } else {
@@ -247,7 +270,7 @@ public:
     /// @param value The variable to store the received value
     /// @return True if the value was received successfully, false if the channel is empty
     /// @note This function is lock-free and wait-free
-    ResponseStatus try_receive(T& value) {
+    ResponseStatus try_receive(T& value) noexcept(std::is_nothrow_move_assignable_v<T> && std::is_nothrow_destructible_v<T>) {
         if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
             // Set reader active flag to prevent overwrites during read
             bool isOccupied = oldestOccupied_.exchange(true, std::memory_order_acq_rel);
@@ -276,29 +299,21 @@ public:
 
         rcvCursor_.store(next_index(rcvCursor), std::memory_order_release);
         
-        if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
-            oldestOccupied_.store(false, std::memory_order_release);
-        }
-        
         if constexpr (Wait == WaitStrategy::ATOMIC_WAIT) {
             rcvCursor_.notify_one(); // Notify sender that a value has been received
+        }
+        
+        if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
+            oldestOccupied_.store(false, std::memory_order_release);
         }
 
         return ResponseStatus::SUCCESS;
     }
 
-    bool is_lock_free() const {
-        if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {
-            return sendCursor_.is_lock_free() && rcvCursor_.is_lock_free() && oldestOccupied_.is_lock_free();
-        } else {
-            return sendCursor_.is_lock_free() && rcvCursor_.is_lock_free();
-        }
-    }
-
 private:
     /// @brief Try to send with WAIT_ON_FULL strategy (original behavior)
     template<typename U>
-    inline ResponseStatus try_send_wait_on_full(U&& value) {
+    inline ResponseStatus try_send_wait_on_full(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
         size_t sendCursor = sendCursor_.load(std::memory_order_relaxed); // only sender thread writes this
         size_t next_sendCursor = next_index(sendCursor);
 
@@ -322,7 +337,7 @@ private:
     
     /// @brief Try to send with OVERWRITE_ON_FULL strategy
     template<typename U>
-    inline ResponseStatus try_send_overwrite_on_full(U&& value) {
+    inline ResponseStatus try_send_overwrite_on_full(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
         size_t sendCursor = sendCursor_.load(std::memory_order_relaxed); // only sender thread writes this
         size_t next_sendCursor = next_index(sendCursor);
 
@@ -364,7 +379,7 @@ private:
     /// @brief Calculate the next power of 2 greater than or equal to n
     /// @param n The input value
     /// @return The next power of 2
-    static constexpr size_t next_power_of_2(size_t n) {
+    static constexpr size_t next_power_of_2(const size_t n) noexcept {
         if (n <= 1) return 1;
         
         // Use bit manipulation for efficiency
@@ -379,7 +394,7 @@ private:
     /// @param val The current index
     /// @return The next index
     /// @note it might not be used for performance but it is a good reference
-    inline size_t next_index(const size_t val) const {
+    inline size_t next_index(const size_t val) const noexcept {
         return (val + 1) & capacity_mask_;
     }
 
@@ -403,4 +418,4 @@ private:
 };
 
 
-} // namespace audioapi::channels::spsc
+} // namespace channels::spsc
