@@ -7,7 +7,7 @@
 #include <type_traits>
 
 
-namespace channels::spsc {
+namespace audioapi::channels::spsc {
 
 /// @brief Overflow strategy for sender when the channel is full
 enum class OverflowStrategy {
@@ -91,6 +91,7 @@ public:
     /// @brief Try to send a value to the channel
     /// @param value The value to send
     /// @return ResponseStatus indicating the result of the operation
+    /// @note this function is lock-free and wait-free
     template<typename U>
     ResponseStatus try_send(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>) {
         return channel_->try_send(std::forward<U>(value));
@@ -98,7 +99,7 @@ public:
 
     /// @brief Send a value to the channel (copy version)
     /// @param value The value to send
-    /// @note This function is blocking and will wait until the value is sent.
+    /// @note This function is lock-free but may block if the channel is full
     void send(const T& value) noexcept(std::is_nothrow_constructible_v<T, const T&>) {
         while (channel_->try_send(value) != ResponseStatus::SUCCESS) {
             if constexpr (Wait == WaitStrategy::YIELD) {
@@ -243,7 +244,7 @@ public:
     
     /// @brief Try to receive a value from the channel
     /// @param value The variable to store the received value
-    /// @return True if the value was received successfully, false if the channel is empty
+    /// @return ResponseStatus indicating the result of the operation
     /// @note This function is lock-free and wait-free
     ResponseStatus try_receive(T& value) noexcept(std::is_nothrow_move_assignable_v<T> && std::is_nothrow_destructible_v<T>) {
         if constexpr (Strategy == OverflowStrategy::OVERWRITE_ON_FULL) {

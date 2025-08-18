@@ -162,13 +162,23 @@ void AudioNodeManager::settlePendingConnections() {
 }
 
 void AudioNodeManager::handleConnectEvent(std::unique_ptr<Event> event) {
-  assert(event->payloadType == EventPayloadType::NODES);
-  event->payload.nodes.from->connectNode(event->payload.nodes.to);
+  if (event->payloadType == EventPayloadType::NODES) {
+    event->payload.nodes.from->connectNode(event->payload.nodes.to);
+  } else if (event->payloadType == EventPayloadType::PARAMS) {
+    event->payload.params.from->connectParam(event->payload.params.to);
+  } else {
+    assert(false && "Invalid payload type for connect event");
+  }
 }
 
 void AudioNodeManager::handleDisconnectEvent(std::unique_ptr<Event> event) {
-  assert(event->payloadType == EventPayloadType::NODES);
-  event->payload.nodes.from->disconnectNode(event->payload.nodes.to);
+  if (event->payloadType == EventPayloadType::NODES) {
+    event->payload.nodes.from->disconnectNode(event->payload.nodes.to);
+  } else if (event->payloadType == EventPayloadType::PARAMS) {
+    event->payload.params.from->disconnectParam(event->payload.params.to);
+  } else {
+    assert(false && "Invalid payload type for disconnect event");
+  }
 }
 
 void AudioNodeManager::handleDisconnectAllEvent(std::unique_ptr<Event> event) {
