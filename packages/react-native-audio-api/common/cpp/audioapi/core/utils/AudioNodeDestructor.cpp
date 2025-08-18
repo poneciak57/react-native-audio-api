@@ -26,8 +26,9 @@ AudioNodeDestructor::~AudioNodeDestructor() {
 }
 
 bool AudioNodeDestructor::tryAddNodeForDeconstruction(
-    const std::shared_ptr<AudioNode> &node) {
-  return sender_.try_send(node) == channels::spsc::ResponseStatus::SUCCESS;
+    std::shared_ptr<AudioNode> &&node) {
+  return sender_.try_send(std::move(node)) ==
+      channels::spsc::ResponseStatus::SUCCESS;
 }
 
 void AudioNodeDestructor::process(

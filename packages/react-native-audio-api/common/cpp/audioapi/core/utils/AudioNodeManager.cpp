@@ -112,7 +112,8 @@ void AudioNodeManager::addPendingParamConnection(
 
 void AudioNodeManager::preProcessGraph() {
   settlePendingConnections();
-  prepareNodesForDestruction();
+  prepareNodesForDestruction(sourceNodes_);
+  prepareNodesForDestruction(processingNodes_);
 }
 
 void AudioNodeManager::addProcessingNode(
@@ -212,38 +213,51 @@ void AudioNodeManager::handleAddToDeconstructionEvent(
   }
 }
 
-void AudioNodeManager::prepareNodesForDestruction() {
-  auto sNodesIt = sourceNodes_.begin();
+template <typename U>
+void AudioNodeManager::prepareNodesForDestruction(std::vector<U> &vec) {
+  /// An example of input-output
+  /// for simplicity we will be considering vector where each value represents
+  /// use_count() of an element vec = [1, 2, 1, 3, 1] our end result will be vec
+  /// = [2, 3, 1, 1, 1] After this operation all nodes with use_count() == 1
+  /// will be at the end and we will try to send them After sending, we will
+  /// only keep nodes with use_count() > 1 or which failed vec = [2, 3, failed,
+  /// sent, sent] // failed will be always before sents vec = [2, 3, failed] and
+  /// we resize
+  /// @note if there are no nodes with use_count() == 1 begin will be equal to
+  /// vec.size()
+  /// @note if all nodes have use_count() == 1 begin will be 0
 
-  while (sNodesIt != sourceNodes_.end()) {
-    // we don't want to destroy nodes that are still playing or will be
-    // playing
-    if (sNodesIt->use_count() == 1 &&
-        (sNodesIt->get()->isUnscheduled() || sNodesIt->get()->isFinished())) {
-      (*sNodesIt)->cleanup();
-      if (nodeDeconstructor_.tryAddNodeForDeconstruction(*sNodesIt)) {
-        sNodesIt = sourceNodes_.erase(sNodesIt);
-      } else {
-        ++sNodesIt;
-      }
-    } else {
-      ++sNodesIt;
+  size_t begin = 0;
+  size_t end = vec.size() - 1;
+
+  // Moves all nodes with use_count() == 1 to the end
+  // nodes in range [begin, vec.size()) should be deleted
+  // so new size of the vector will be `begin`
+  while (begin <= end) {
+    while (begin < end && vec[end].use_count() == 1) {
+      end--;
     }
+    if (vec[begin].use_count() == 1) {
+      std::swap(vec[begin], vec[end]);
+      end--;
+    }
+    begin++;
   }
 
-  auto pNodesIt = processingNodes_.begin();
+  for (int i = begin; i < vec.size(); i++) {
+    vec[i]->cleanup();
 
-  while (pNodesIt != processingNodes_.end()) {
-    if (pNodesIt->use_count() == 1) {
-      (*pNodesIt)->cleanup();
-      if (nodeDeconstructor_.tryAddNodeForDeconstruction(*pNodesIt)) {
-        pNodesIt = processingNodes_.erase(pNodesIt);
-      } else {
-        ++pNodesIt;
-      }
-    } else {
-      ++pNodesIt;
+    /// If we fail to add we can't safely remove the node from the vector
+    /// so we swap it and advance begin cursor
+    /// @note vec[i] does NOT get moved out if it is not successfully added.
+    if (!nodeDeconstructor_.tryAddNodeForDeconstruction(std::move(vec[i]))) {
+      std::swap(vec[i], vec[begin]);
+      begin++;
     }
+  }
+  if (begin < vec.size()) {
+    // it does not realocate if newer size is < current size
+    vec.resize(begin);
   }
 }
 

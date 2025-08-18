@@ -123,7 +123,8 @@ class AudioNodeManager {
   void handleDisconnectAllEvent(std::unique_ptr<Event> event);
   void handleAddToDeconstructionEvent(std::unique_ptr<Event> event);
 
-  void prepareNodesForDestruction();
+  template <typename U>
+  void prepareNodesForDestruction(std::vector<U> &vec);
 };
 
 } // namespace audioapi

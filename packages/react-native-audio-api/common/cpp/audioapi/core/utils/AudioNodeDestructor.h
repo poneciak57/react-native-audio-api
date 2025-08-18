@@ -18,7 +18,8 @@ class AudioNodeDestructor {
   /// @brief Adds a node to the deconstruction queue.
   /// @param node The audio node to be deconstructed.
   /// @return True if the node was successfully added, false otherwise.
-  bool tryAddNodeForDeconstruction(const std::shared_ptr<AudioNode> &node);
+  /// @note node does NOT get moved out if it is not successfully added.
+  bool tryAddNodeForDeconstruction(std::shared_ptr<AudioNode> &&node);
 
  private:
   std::thread thread_;
