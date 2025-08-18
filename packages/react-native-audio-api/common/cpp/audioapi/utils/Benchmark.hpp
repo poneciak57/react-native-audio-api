@@ -10,6 +10,19 @@
 
 namespace audioapi::benchmarks {
 
+    /// @brief Gets the execution time of a function
+    /// @tparam Func The type of the function to benchmark
+    /// @param func The function to benchmark
+    /// @return The duration of the function execution in nanoseconds
+    /// @note This function is safe to use across threads
+    template <typename Func>
+    double getExecutionTime(Func&& func) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::forward<Func>(func)();
+        auto end = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    }
+
     /// @brief Logs the average execution time of a function
     /// @tparam Func The type of the function to benchmark
     /// @param msg The message to log
@@ -41,18 +54,5 @@ namespace audioapi::benchmarks {
             printf("%s: %lld ns\n", msg.c_str(), avgDuration);
         #endif
         return duration;
-    }
-
-    /// @brief Gets the execution time of a function
-    /// @tparam Func The type of the function to benchmark
-    /// @param func The function to benchmark
-    /// @return The duration of the function execution in nanoseconds
-    /// @note This function is safe to use across threads
-    template <typename Func>
-    double getExecutionTime(Func&& func) {
-        auto start = std::chrono::high_resolution_clock::now();
-        std::forward<Func>(func)();
-        auto end = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
     }
 }
