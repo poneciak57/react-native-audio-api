@@ -214,7 +214,11 @@ void AudioNodeManager::handleAddToDeconstructionEvent(
 }
 
 template <typename U>
-void AudioNodeManager::prepareNodesForDestruction(std::vector<U> &vec) {
+void AudioNodeManager::prepareNodesForDestruction(
+    std::vector<std::shared_ptr<U>> &vec) {
+  if (vec.empty()) {
+    return;
+  }
   /// An example of input-output
   /// for simplicity we will be considering vector where each value represents
   /// use_count() of an element vec = [1, 2, 1, 3, 1] our end result will be vec
@@ -223,12 +227,12 @@ void AudioNodeManager::prepareNodesForDestruction(std::vector<U> &vec) {
   /// only keep nodes with use_count() > 1 or which failed vec = [2, 3, failed,
   /// sent, sent] // failed will be always before sents vec = [2, 3, failed] and
   /// we resize
-  /// @note if there are no nodes with use_count() == 1 begin will be equal to
+  /// @note if there are no nodes with use_count() == 1 `begin` will be equal to
   /// vec.size()
-  /// @note if all nodes have use_count() == 1 begin will be 0
+  /// @note if all nodes have use_count() == 1 `begin` will be 0
 
-  size_t begin = 0;
-  size_t end = vec.size() - 1;
+  int begin = 0;
+  int end = vec.size() - 1; // can be -1 (edge case)
 
   // Moves all nodes with use_count() == 1 to the end
   // nodes in range [begin, vec.size()) should be deleted
@@ -245,7 +249,8 @@ void AudioNodeManager::prepareNodesForDestruction(std::vector<U> &vec) {
   }
 
   for (int i = begin; i < vec.size(); i++) {
-    vec[i]->cleanup();
+    if (vec[i])
+      vec[i]->cleanup();
 
     /// If we fail to add we can't safely remove the node from the vector
     /// so we swap it and advance begin cursor

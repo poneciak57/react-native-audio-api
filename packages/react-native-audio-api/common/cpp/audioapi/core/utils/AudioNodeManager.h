@@ -124,7 +124,7 @@ class AudioNodeManager {
   void handleAddToDeconstructionEvent(std::unique_ptr<Event> event);
 
   template <typename U>
-  void prepareNodesForDestruction(std::vector<U> &vec);
+  void prepareNodesForDestruction(std::vector<std::shared_ptr<U>> &vec);
 };
 
 } // namespace audioapi
