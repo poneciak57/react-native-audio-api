@@ -6,7 +6,6 @@
 #include <mutex>
 #include <tuple>
 #include <vector>
-#include <unordered_set>
 
 #include <audioapi/utils/SpscChannel.hpp>
 
@@ -96,10 +95,17 @@ class AudioNodeManager {
  private:
   AudioNodeDestructor nodeDeconstructor_;
 
-  // all nodes created in the context
-  std::unordered_set<std::shared_ptr<AudioScheduledSourceNode>> sourceNodes_;
-  std::unordered_set<std::shared_ptr<AudioNode>> processingNodes_;
-  std::unordered_set<std::shared_ptr<AudioParam>> audioParams_;
+  /// @brief Initial capacity for various node types for deletion
+  /// @note Higher capacity decreases number of reallocations at runtime (can be easily adjusted to 128 if needed)
+  const size_t kInitialCapacity = 32;
+
+  /// @brief Initial capacity for event passing channel
+  /// @note High value reduces wait time for sender (JavaScript/HostObjects thread here)
+  const size_t kChannelCapacity = 1024;
+
+  std::vector<std::shared_ptr<AudioScheduledSourceNode>> sourceNodes_;
+  std::vector<std::shared_ptr<AudioNode>> processingNodes_;
+  std::vector<std::shared_ptr<AudioParam>> audioParams_;
 
   channels::spsc::Receiver<
     std::unique_ptr<Event>,
@@ -115,7 +121,7 @@ class AudioNodeManager {
   void handleConnectEvent(std::unique_ptr<Event> event);
   void handleDisconnectEvent(std::unique_ptr<Event> event);
   void handleDisconnectAllEvent(std::unique_ptr<Event> event);
-  void handleAddEvent(std::unique_ptr<Event> event);
+  void handleAddToDeconstructionEvent(std::unique_ptr<Event> event);
 
   void prepareNodesForDestruction();
 };

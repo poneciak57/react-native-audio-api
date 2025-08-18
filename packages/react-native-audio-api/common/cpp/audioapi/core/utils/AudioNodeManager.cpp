@@ -67,10 +67,14 @@ AudioNodeManager::Event::~Event() {
 }
 
 AudioNodeManager::AudioNodeManager() {
+  sourceNodes_.reserve(kInitialCapacity);
+  processingNodes_.reserve(kInitialCapacity);
+  audioParams_.reserve(kInitialCapacity);
+
   auto channel_pair = channels::spsc::channel<
       std::unique_ptr<Event>,
       channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-      channels::spsc::WaitStrategy::BUSY_LOOP>(1024);
+      channels::spsc::WaitStrategy::BUSY_LOOP>(kChannelCapacity);
 
   sender_ = std::move(channel_pair.first);
   receiver_ = std::move(channel_pair.second);
@@ -155,7 +159,7 @@ void AudioNodeManager::settlePendingConnections() {
         handleDisconnectAllEvent(std::move(value));
         break;
       case ConnectionType::ADD:
-        handleAddEvent(std::move(value));
+        handleAddToDeconstructionEvent(std::move(value));
         break;
     }
   }
@@ -191,16 +195,17 @@ void AudioNodeManager::handleDisconnectAllEvent(std::unique_ptr<Event> event) {
   }
 }
 
-void AudioNodeManager::handleAddEvent(std::unique_ptr<Event> event) {
+void AudioNodeManager::handleAddToDeconstructionEvent(
+    std::unique_ptr<Event> event) {
   switch (event->payloadType) {
     case EventPayloadType::NODE:
-      processingNodes_.insert(event->payload.node);
+      processingNodes_.push_back(event->payload.node);
       break;
     case EventPayloadType::SOURCE_NODE:
-      sourceNodes_.insert(event->payload.sourceNode);
+      sourceNodes_.push_back(event->payload.sourceNode);
       break;
     case EventPayloadType::AUDIO_PARAM:
-      audioParams_.insert(event->payload.audioParam);
+      audioParams_.push_back(event->payload.audioParam);
       break;
     default:
       assert(false && "Unknown event payload type");
@@ -256,6 +261,7 @@ void AudioNodeManager::cleanup() {
 
   sourceNodes_.clear();
   processingNodes_.clear();
+  audioParams_.clear();
 }
 
 } // namespace audioapi
