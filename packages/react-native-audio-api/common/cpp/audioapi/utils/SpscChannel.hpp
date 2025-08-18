@@ -22,7 +22,7 @@ enum class OverflowStrategy {
 enum class WaitStrategy {
     /// @brief Busy loop waiting strategy
     /// @note should be used when low latency is required and channel is not expected to wait
-    /// @note should be definitly used with OverflowStrategy::OVERWRITE_ON_FULL
+    /// @note should be definitely used with OverflowStrategy::OVERWRITE_ON_FULL
     /// @note it uses `asm volatile ("" ::: "memory")` to prevent harmful compiler optimizations
     BUSY_LOOP,
 
