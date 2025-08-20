@@ -15,6 +15,11 @@ class AudioNode;
 class AudioScheduledSourceNode;
 class AudioParam;
 
+#define AUDIO_NODE_MANAGER_SPSC_OPTIONS \
+  std::unique_ptr<Event>, \
+  channels::spsc::OverflowStrategy::WAIT_ON_FULL, \
+  channels::spsc::WaitStrategy::BUSY_LOOP
+
 class AudioNodeManager {
  public:
   enum class ConnectionType { CONNECT, DISCONNECT, DISCONNECT_ALL, ADD };
@@ -108,14 +113,10 @@ class AudioNodeManager {
   std::vector<std::shared_ptr<AudioParam>> audioParams_;
 
   channels::spsc::Receiver<
-    std::unique_ptr<Event>,
-    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-    channels::spsc::WaitStrategy::BUSY_LOOP> receiver_;
+    AUDIO_NODE_MANAGER_SPSC_OPTIONS> receiver_;
 
   channels::spsc::Sender<
-    std::unique_ptr<Event>,
-    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-    channels::spsc::WaitStrategy::BUSY_LOOP> sender_;
+    AUDIO_NODE_MANAGER_SPSC_OPTIONS> sender_;
 
   void settlePendingConnections();
   void handleConnectEvent(std::unique_ptr<Event> event);
@@ -126,5 +127,7 @@ class AudioNodeManager {
   template <typename U>
   void prepareNodesForDestruction(std::vector<std::shared_ptr<U>> &vec);
 };
+
+#undef AUDIO_NODE_MANAGER_SPSC_OPTIONS
 
 } // namespace audioapi

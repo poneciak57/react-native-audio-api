@@ -10,6 +10,11 @@ namespace audioapi {
 
 class AudioNode;
 
+#define AUDIO_NODE_DESTRUCTOR_SPSC_OPTIONS \
+  std::shared_ptr<AudioNode>, \
+  channels::spsc::OverflowStrategy::WAIT_ON_FULL, \
+  channels::spsc::WaitStrategy::ATOMIC_WAIT
+
 class AudioNodeDestructor {
  public:
   AudioNodeDestructor();
@@ -23,19 +28,17 @@ class AudioNodeDestructor {
 
  private:
   std::thread thread_;
-  channels::spsc::Sender<
-    std::shared_ptr<AudioNode>,
-    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-    channels::spsc::WaitStrategy::ATOMIC_WAIT> sender_;
-
   std::atomic<bool> isExiting_;
+
+  channels::spsc::Sender<
+    AUDIO_NODE_DESTRUCTOR_SPSC_OPTIONS> sender_;
 
   /// @brief Processes audio nodes for deconstruction.
   /// @param receiver The receiver channel for incoming audio nodes.
   void process(channels::spsc::Receiver<
-    std::shared_ptr<AudioNode>,
-    channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-    channels::spsc::WaitStrategy::ATOMIC_WAIT> &&receiver);
+    AUDIO_NODE_DESTRUCTOR_SPSC_OPTIONS> &&receiver);
 };
+
+#undef AUDIO_NODE_DESTRUCTOR_SPSC_OPTIONS
 
 } // namespace audioapi
