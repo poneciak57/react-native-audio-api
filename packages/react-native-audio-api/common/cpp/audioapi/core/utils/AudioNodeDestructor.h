@@ -27,7 +27,9 @@ class AudioNodeDestructor {
   bool tryAddNodeForDeconstruction(std::shared_ptr<AudioNode> &&node);
 
  private:
-  std::thread thread_;
+  static constexpr size_t kChannelCapacity = 1024;
+
+  std::thread workerHandle_;
   std::atomic<bool> isExiting_;
 
   channels::spsc::Sender<

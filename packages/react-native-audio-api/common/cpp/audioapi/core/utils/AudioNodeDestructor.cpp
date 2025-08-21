@@ -9,9 +9,9 @@ AudioNodeDestructor::AudioNodeDestructor() {
   auto [sender, receiver] = channels::spsc::channel<
       std::shared_ptr<AudioNode>,
       channels::spsc::OverflowStrategy::WAIT_ON_FULL,
-      channels::spsc::WaitStrategy::ATOMIC_WAIT>(1024);
+      channels::spsc::WaitStrategy::ATOMIC_WAIT>(kChannelCapacity);
   sender_ = std::move(sender);
-  thread_ =
+  workerHandle_ =
       std::thread(&AudioNodeDestructor::process, this, std::move(receiver));
 }
 
@@ -20,8 +20,8 @@ AudioNodeDestructor::~AudioNodeDestructor() {
 
   // We need to send a nullptr to unblock the receiver
   sender_.send(nullptr);
-  if (thread_.joinable()) {
-    thread_.join();
+  if (workerHandle_.joinable()) {
+    workerHandle_.join();
   }
 }
 
